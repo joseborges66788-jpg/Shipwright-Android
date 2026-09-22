@@ -1,0 +1,45 @@
+name: Android Debug Build (Impactful Combat)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android-debug:
+    runs-on: ubuntu-24.04
+    container:
+      image: djvdw7f2ro/android-builder-soh:v1.0.4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure Android SDK
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          printf 'sdk.dir=%s\nndk.dir=%s\n' "$ANDROID_SDK_ROOT" "$ANDROID_NDK_HOME" > Android/local.properties
+      - name: Install host dependencies
+        run: |
+          apt-get update
+          apt-get install -y $(cat linux-build-deps/apt.txt)
+      - name: Prepare extractor dependencies
+        working-directory: Android
+        run: ./gradlew applyZapdtrAndroidPatch applyOtrExporterAndroidPatch
+      - name: Generate matching resources
+        run: |
+          cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-linux --target GenerateSohOtr --parallel 4
+          cp build-linux/soh/soh.o2r Android/app/src/main/assets/soh.o2r
+          tools/ci/inject_android_renderer_shaders.sh
+      - name: Build debug APK (no signing secrets needed)
+        working-directory: Android
+        run: ./gradlew assembleDebug
+      - name: Prepare artifact
+        run: |
+          mkdir -p debug-apk
+          find Android/app/build/outputs/apk/debug -name "*.apk" -exec cp {} debug-apk/ \;
+      - uses: actions/upload-artifact@v4
+        with:
+          name: impactful-combat-debug-apk
+          path: debug-apk/*
+          if-no-files-found: error
+          retention-days: 14
+          
